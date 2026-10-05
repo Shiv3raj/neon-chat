@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeonChat | Ephemeral Space</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap');
+        
+        :root {
+            --bg-color: #050508;
+            --panel-bg: rgba(14, 16, 26, 0.8);
+            --neon-blue: #00f3ff;
+            --neon-purple: #bd00ff;
+            --text-main: #f0f0f0;
+            --text-muted: #8892b0;
+            --danger: #ff0055;
+            --success: #00ff88;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            background-image: radial-gradient(circle at 50% 0%, #1a0b2e 0%, transparent 50%), 
+                              radial-gradient(circle at 50% 100%, #051a2e 0%, transparent 50%);
+        }
+
+        .glass-panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(0, 243, 255, 0.1);
+            border-radius: 16px;
+            box-shadow: 0 0 20px rgba(0, 243, 255, 0.05), inset 0 0 10px rgba(189, 0, 255, 0.05);
+            padding: 30px;
+            width: 90%;
+            max-width: 450px;
+            transition: all 0.3s ease;
+        }
+
+        h1, h2 { font-family: 'Orbitron', sans-serif; text-align: center; margin-bottom: 20px; text-shadow: 0 0 10px var(--neon-blue); }
+        
+        input {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 15px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--text-muted);
+            color: var(--text-main);
+            border-radius: 8px;
+            outline: none;
+            transition: 0.3s;
+        }
+        input:focus { border-color: var(--neon-blue); box-shadow: 0 0 8px var(--neon-blue); }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: 0.3s;
+            margin-bottom: 10px;
+        }
+        .btn-primary { background: linear-gradient(90deg, var(--neon-blue), var(--neon-purple)); color: white; box-shadow: 0 0 15px rgba(189, 0, 255, 0.4); }
+        .btn-primary:hover { box-shadow: 0 0 25px rgba(0, 243, 255, 0.6); }
+        .btn-secondary { background: transparent; border: 1px solid var(--neon-blue); color: var(--neon-blue); }
+        .btn-secondary:hover { background: rgba(0, 243, 255, 0.1); }
+        .btn-danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
+        
+        /* Chat Interface */
+        #chat-interface { display: none; width: 100%; max-width: 800px; height: 90vh; display: flex; flex-direction: column; }
+        #chat-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; }
+        .copy-link { cursor: pointer; color: var(--neon-blue); font-size: 0.9em; text-decoration: underline; }
+        
+        #messages { flex-grow: 1; overflow-y: auto; padding-right: 10px; display: flex; flex-direction: column; gap: 12px; }
+        .message { padding: 10px 15px; border-radius: 12px; max-width: 80%; width: fit-content; word-wrap: break-word; }
+        .message.self { background: rgba(189, 0, 255, 0.2); border: 1px solid var(--neon-purple); align-self: flex-end; border-bottom-right-radius: 2px; }
+        .message.other { background: rgba(0, 243, 255, 0.1); border: 1px solid var(--neon-blue); align-self: flex-start; border-bottom-left-radius: 2px; }
+        .message.system { background: transparent; color: var(--text-muted); align-self: center; font-size: 0.85em; font-style: italic; }
+        .msg-author { font-size: 0.75em; color: var(--text-muted); margin-bottom: 4px; }
+
+        audio { height: 35px; outline: none; border-radius: 20px; }
+
+        #input-area { display: flex; gap: 10px; margin-top: 15px; align-items: center; }
+        #input-area input { margin-bottom: 0; }
+        #send-btn { width: auto; padding: 12px 20px; margin: 0; }
+        
+        #mic-btn { 
+            width: 50px; height: 50px; border-radius: 50%; border: none; background: #222; color: white; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: 0.2s; 
+        }
+        #mic-btn.recording { background: var(--danger); box-shadow: 0 0 15px var(--danger); animation: pulse 1s infinite; }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        /* Modals */
+        #approval-modal {
+            position: fixed; top: 20px; right: 20px; background: var(--panel-bg); border: 1px solid var(--neon-purple); padding: 15px; border-radius: 10px; display: none; z-index: 100; box-shadow: 0 0 20px rgba(189,0,255,0.3);
+        }
+        .modal-btns { display: flex; gap: 10px; margin-top: 10px; }
+        .modal-btns button { padding: 8px; font-size: 0.8em; margin: 0; }
+        
+        /* Utility */
+        .hidden { display: none !important; }
+        
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(0, 243, 255, 0.3); border-radius: 10px; }
+    </style>
+</head>
+<body>
+
+    <!-- 1. Setup Screen -->
+    <div id="setup-screen" class="glass-panel">
+        <h1>NeonChat</h1>
+        <p style="text-align: center; color: var(--text-muted); margin-bottom: 20px; font-size: 0.9em;">Ephemeral & Secure</p>
+        
+        <input type="text" id="username" placeholder="Enter Username" autocomplete="off" maxlength="20">
+        
+        <div id="join-section">
+            <input type="text" id="room-id" placeholder="Room ID (if joining)" autocomplete="off">
+            <button class="btn-primary" onclick="joinRoom()">Join Room</button>
+            <div style="text-align: center; margin: 15px 0; color: var(--text-muted);">OR</div>
+            <button class="btn-secondary" onclick="createRoom()">Create New Room</button>
+        </div>
+        
+        <div id="waiting-overlay" class="hidden" style="text-align: center; padding: 20px;">
+            <h3 style="color: var(--neon-blue);">Waiting for Host...</h3>
+            <p style="font-size: 0.8em; color: var(--text-muted); margin-top: 10px;">The host must approve your entry.</p>
+        </div>
+    </div>
+
+    <!-- 2. Chat Interface -->
+    <div id="chat-interface" class="glass-panel hidden">
+        <div id="chat-header">
+            <div>
+                <h2>Room: <span id="display-room-id" style="color: var(--neon-purple);"></span></h2>
+            </div>
+            <div class="copy-link" onclick="copyInviteLink()">[ Copy Invite Link ]</div>
+        </div>
+        
+        <div id="messages">
+            <!-- Messages render here -->
+        </div>
+        
+        <div id="input-area">
+            <button id="mic-btn" onmousedown="startRecording()" onmouseup="stopRecording()" ontouchstart="startRecording()" ontouchend="stopRecording()">
+                🎤
+            </button>
+            <input type="text" id="msg-input" placeholder="Type a secure message..." autocomplete="off">
+            <button id="send-btn" class="btn-primary" onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <!-- 3. Host Approval Modal -->
+    <div id="approval-modal">
+        <p><strong><span id="req-username"></span></strong> wants to join.</p>
+        <div class="modal-btns">
+            <button class="btn-primary" onclick="resolveJoin(true)" style="background: var(--success); color: #000;">Approve</button>
+            <button class="btn-danger" onclick="resolveJoin(false)">Reject</button>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let currentRoom = null;
+        let myUsername = '';
+        let isHost = false;
+        
+        // Audio Recording variables
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+
+        // Auto-fill Room ID from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('room')) {
+            document.getElementById('room-id').value = urlParams.get('room');
+        }
+
+        // --- DOM Elements ---
+        const setupScreen = document.getElementById('setup-screen');
+        const joinSection = document.getElementById('join-section');
+        const waitingOverlay = document.getElementById('waiting-overlay');
+        const chatInterface = document.getElementById('chat-interface');
+        const messagesDiv = document.getElementById('messages');
+        const msgInput = document.getElementById('msg-input');
+        const micBtn = document.getElementById('mic-btn');
+
+        // --- Setup Audio Permissions & Recorder ---
+        navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(stream => {
+                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder.ondataavailable = e => {
+                    if (e.data.size > 0) audioChunks.push(e.data);
+                };
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    if (audioBlob.size > 0) {
+                        socket.emit('send_voice', audioBlob); // Send binary blob securely over WebSocket
+                    }
+                    audioChunks = [];
+                };
+            })
+            .catch(err => {
+                console.error("Mic access denied.", err);
+                micBtn.style.display = 'none'; // Hide if denied
+            });
+
+        function startRecording() {
+            if (!mediaRecorder || isRecording) return;
+            audioChunks = [];
+            mediaRecorder.start();
+            isRecording = true;
+            micBtn.classList.add('recording');
+        }
+
+        function stopRecording() {
+            if (!mediaRecorder || !isRecording) return;
+            mediaRecorder.stop();
+            isRecording = false;
+            micBtn.classList.remove('recording');
+        }
+
+        // --- Core Functions ---
+        function createRoom() {
+            const user = document.getElementById('username').value.trim();
+            if (!user) return alert("Enter a username");
+            myUsername = user;
+            socket.emit('create_room', user);
+        }
+
+        function joinRoom() {
+            const user = document.getElementById('username').value.trim();
+            const room = document.getElementById('room-id').value.trim();
+            if (!user || !room) return alert("Enter username and Room ID");
+            myUsername = user;
+            socket.emit('request_join', { roomId: room, username: user });
+        }
+
+        function copyInviteLink() {
+            const link = `${window.location.origin}?room=${currentRoom}`;
+            navigator.clipboard.writeText(link).then(() => alert('Secure invite link copied!'));
+        }
+
+        function switchScreen(toChat) {
+            if (toChat) {
+                setupScreen.classList.add('hidden');
+                chatInterface.classList.remove('hidden');
+                document.getElementById('display-room-id').innerText = currentRoom;
+            } else {
+                setupScreen.classList.remove('hidden');
+                chatInterface.classList.add('hidden');
+                joinSection.classList.remove('hidden');
+                waitingOverlay.classList.add('hidden');
+            }
+        }
+
+        function appendMessage(sender, content, type, isSelf) {
+            const div = document.createElement('div');
+            div.className = `message ${type === 'system' ? 'system' : (isSelf ? 'self' : 'other')}`;
+            
+            if (type !== 'system') {
+                const author = document.createElement('div');
+                author.className = 'msg-author';
+                author.textContent = isSelf ? 'You' : sender;
+                div.appendChild(author);
+            }
+
+            if (type === 'text' || type === 'system') {
+                const textNode = document.createTextNode(content);
+                div.appendChild(textNode);
+            } else if (type === 'audio') {
+                // Securely render ephemeral audio object URL
+                const audioBlob = new Blob([content], { type: 'audio/webm' });
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audioEl = document.createElement('audio');
+                audioEl.controls = true;
+                audioEl.src = audioUrl;
+                div.appendChild(audioEl);
+            }
+
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function sendMessage() {
+            const text = msgInput.value.trim();
+            if (!text) return;
+            socket.emit('send_message', text);
+            msgInput.value = '';
+        }
+        
+        msgInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+
+        // --- Socket Events (Client Side) ---
+        socket.on('room_created', (data) => {
+            currentRoom = data.roomId;
+            isHost = true;
+            window.history.pushState({}, '', `/?room=${currentRoom}`);
+            switchScreen(true);
+            appendMessage('System', 'You created the room. You are the host.', 'system');
+        });
+
+        socket.on('waiting_for_approval', () => {
+            joinSection.classList.add('hidden');
+            waitingOverlay.classList.remove('hidden');
+        });
+
+        socket.on('join_error', (msg) => { alert(msg); switchScreen(false); });
+        socket.on('join_rejected', (msg) => { alert(msg); switchScreen(false); });
+        
+        socket.on('join_approved', (data) => {
+            currentRoom = data.roomId;
+            isHost = false;
+            switchScreen(true);
+            appendMessage('System', 'The host let you in. Connection secure.', 'system');
+        });
+
+        socket.on('receive_message', (data) => {
+            appendMessage(data.username, data.type === 'text' ? data.text : data.audioBuffer, data.type, data.senderId === socket.id);
+        });
+
+        socket.on('system_message', (msg) => { appendMessage('System', msg, 'system'); });
+
+        socket.on('room_destroyed', (msg) => {
+            alert(msg); // Alert user that host killed the room
+            window.location.href = '/'; // Hard reset
+        });
+
+        // --- Host Approval Queue Logic ---
+        let approvalQueue = [];
+        let isModalOpen = false;
+
+        socket.on('join_request', (data) => {
+            approvalQueue.push(data);
+            processQueue();
+        });
+
+        function processQueue() {
+            if (isModalOpen || approvalQueue.length === 0) return;
+            isModalOpen = true;
+            const nextReq = approvalQueue[0];
+            document.getElementById('req-username').innerText = nextReq.username;
+            document.getElementById('approval-modal').style.display = 'block';
+        }
+
+        window.resolveJoin = function(isApproved) {
+            const req = approvalQueue.shift();
+            document.getElementById('approval-modal').style.display = 'none';
+            isModalOpen = false;
+            
+            if (isApproved) {
+                socket.emit('approve_join', req.socketId);
+            } else {
+                socket.emit('reject_join', req.socketId);
+            }
+            processQueue(); // Check if others are waiting
+        };
+
+    </script>
+</body>
+</html>
